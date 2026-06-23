@@ -44,7 +44,7 @@ jobs:
         run: |
           INSTANCE_ID=$(aws ec2 run-instances \
             --image-id ${{ secrets.EC2_AMI_ID }} \
-            --instance-type ${{ github.event.inputs.instance_type }} \
+            --instance-type t2.micro \
             --key-name ${{ secrets.EC2_KEY_PAIR }} \
             --security-group-ids ${{ secrets.EC2_SECURITY_GROUP }} \
             --subnet-id ${{ secrets.EC2_SUBNET_ID }} \
