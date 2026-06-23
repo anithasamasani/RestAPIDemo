@@ -2,20 +2,74 @@ name: Create EC2 Instance
 
 on:
   workflow_dispatch:
+    inputs:
+      instance_type:
+        description: 'EC2 Instance Type'
+        required: true
+        default: 't2.micro'
+        type: choice
+        options:
+          - t2.micro
+          - t2.small
+          - t2.medium
+      instance_name:
+        description: 'Name tag for EC2 instance'
+        required: true
+        default: 'MyGitHubEC2'
 
 jobs:
   create-ec2:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Step 1 - Checkout code
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
+      # Step 2 - Configure AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ secrets.AWS_REGION }}
 
+      # Step 3 - Verify AWS connection
       - name: Verify AWS Credentials
         run: aws sts get-caller-identity
+
+      # Step 4 - Create EC2 Instance
+      - name: Create EC2 Instance
+        id: create-ec2
+        run: |
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --image-id ${{ secrets.EC2_AMI_ID }} \
+            --instance-type ${{ github.event.inputs.instance_type }} \
+            --key-name ${{ secrets.EC2_KEY_PAIR }} \
+            --security-group-ids ${{ secrets.EC2_SECURITY_GROUP }} \
+            --subnet-id ${{ secrets.EC2_SUBNET_ID }} \
+            --tag-specifications \
+              'ResourceType=instance,Tags=[{Key=Name,Value=${{ github.event.inputs.instance_name }}},{Key=CreatedBy,Value=GitHubActions}]' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "✅ EC2 Instance Created: $INSTANCE_ID"
+
+      # Step 5 - Wait for instance to be running
+      - name: Wait for Instance to Start
+        run: |
+          echo "⏳ Waiting for instance to be in running state..."
+          aws ec2 wait instance-running \
+            --instance-ids ${{ steps.create-ec2.outputs.INSTANCE_ID }}
+          echo "✅ Instance is now RUNNING!"
+
+      # Step 6 - Get Public IP
+      - name: Get EC2 Public IP
+        run: |
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids ${{ steps.create-ec2.outputs.INSTANCE_ID }} \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          echo "🌐 Public IP: $PUBLIC_IP"
+          echo "🔑 SSH Command: ssh -i github-actions-key.pem ec2-user@$PUBLIC_IP"
