@@ -1,0 +1,83 @@
+name: Deploy Spring Boot to EC2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1 - Checkout Code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2 - Set up Java 17
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'corretto'
+
+      # Step 3 - Build JAR
+      - name: Build JAR with Maven
+        run: mvn clean package -DskipTests
+
+      # Step 4 - Verify JAR Created
+      - name: Verify JAR
+        run: |
+          ls -lh target/*.jar
+          echo "✅ JAR built successfully!"
+
+      # Step 5 - Copy JAR to EC2
+      - name: Copy JAR to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "target/*.jar"
+          target: "/opt/springboot/"
+          strip_components: 1
+
+      # Step 6 - Deploy on EC2
+      - name: Deploy and Start App
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Rename JAR to app.jar
+            mv /opt/springboot/*.jar /opt/springboot/app.jar
+
+            # Stop existing app if running
+            sudo systemctl stop springboot || true
+
+            # Start the app
+            sudo systemctl start springboot
+
+            # Wait for app to start
+            sleep 10
+
+            # Check status
+            sudo systemctl status springboot
+
+            echo "✅ Spring Boot Deployed Successfully!"
+
+      # Step 7 - Verify App Running
+      - name: Verify Deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Check app is listening on port 8080
+            netstat -tlnp | grep 8080
+
+            # Show last 20 lines of log
+            tail -20 /opt/springboot/logs/app.log
